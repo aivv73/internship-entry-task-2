@@ -1,0 +1,43 @@
+services:
+  candidate-service:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://payment:payment@postgres:5432/payments
+      PROVIDER_URL: http://provider-simulator:8081
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://localhost:8080/health', timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payment
+      POSTGRES_PASSWORD: payment
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - candidate-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment -d payments"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  candidate-data:

@@ -1,5 +1,46 @@
 # Вступительное задание: «Платёж прошёл? Докажи»
 
+## Разработка сервиса
+
+Требования: Python 3.14, [uv](https://docs.astral.sh/uv/) и Docker с Compose.
+
+Установка зависимостей и запуск тестов:
+
+```bash
+uv sync --dev
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+```
+
+Интеграционная проверка `/health` через настоящий PostgreSQL (URL должен использовать драйвер
+`postgresql+asyncpg`):
+
+```bash
+TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@localhost:5432/payments \
+  uv run pytest tests/integration
+```
+
+Локальный запуск API при доступном PostgreSQL:
+
+```bash
+export DATABASE_URL=postgresql+asyncpg://payment:payment@localhost:5432/payments
+export PROVIDER_URL=http://localhost:8081
+uv run alembic upgrade head
+uv run uvicorn payment_service.main:app --host 0.0.0.0 --port 8080
+```
+
+Запуск контейнеров:
+
+```bash
+docker compose up --build
+curl -i http://localhost:8080/health
+docker compose down
+```
+
+PostgreSQL хранит данные в именованном томе `candidate-data`. Обычный `docker compose down`
+сохраняет том; для полного удаления данных используйте `docker compose down --volumes`.
+
 Нужно собрать сервис, который проводит платёжную операцию через внешнего провайдера и сохраняет корректное состояние при повторах, конкурентных запросах, потерянных HTTP-ответах и перезапусках.
 
 Внешнюю систему изображает готовый `provider-simulator`. Сервис должен действительно вызывать его по HTTP. Успешный транспортный ответ не доказывает завершение платежа, а отсутствие ответа не доказывает, что платёж не был создан. Финальный результат определяется только callback-квитанцией.
