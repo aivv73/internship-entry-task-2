@@ -144,9 +144,15 @@ async def test_migrations_create_operation_and_event_schema(
         await engine.dispose()
 
     assert schema == {
-        "tables": {"alembic_version", "operations", "operation_events"},
+        "tables": {
+            "alembic_version",
+            "dispatch_intents",
+            "operations",
+            "operation_events",
+        },
         "operation_primary_key": ["operation_id"],
         "event_primary_key": ["operation_id", "event_id"],
+        "intent_primary_key": ["operation_id"],
     }
 
 
@@ -169,4 +175,7 @@ def read_operation_schema(connection: Connection) -> dict[str, object]:
         "tables": set(inspector.get_table_names()),
         "operation_primary_key": inspector.get_pk_constraint("operations")["constrained_columns"],
         "event_primary_key": inspector.get_pk_constraint("operation_events")["constrained_columns"],
+        "intent_primary_key": inspector.get_pk_constraint("dispatch_intents")[
+            "constrained_columns"
+        ],
     }

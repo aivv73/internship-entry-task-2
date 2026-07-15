@@ -2,12 +2,12 @@ from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from payment_service.models import Operation, OperationEvent, OperationStatus
+from payment_service.models import DispatchIntent, Operation, OperationEvent, OperationStatus
 from payment_service.schemas import (
     CreateOperationRequest,
     OperationEventResponse,
@@ -23,6 +23,14 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
 
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
+
+
+async def next_event_id(session: AsyncSession, operation_id: str) -> int:
+    return await session.scalar(
+        select(func.coalesce(func.max(OperationEvent.event_id), 0) + 1).where(
+            OperationEvent.operation_id == operation_id
+        )
+    )
 
 
 @router.post("", response_model=OperationResponse, status_code=status.HTTP_201_CREATED)
@@ -63,6 +71,46 @@ async def get_operation(
     )
     if operation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return operation
+
+
+@router.post(
+    "/{operation_id}/submit",
+    response_model=OperationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_operation(
+    operation_id: str,
+    response: Response,
+    session: SessionDependency,
+) -> Operation:
+    async with session.begin():
+        operation = await session.scalar(
+            select(Operation).where(Operation.operation_id == operation_id).with_for_update()
+        )
+        if operation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        if operation.status != OperationStatus.CREATED:
+            response.status_code = status.HTTP_200_OK
+            return operation
+
+        event_id = await next_event_id(session, operation_id)
+        operation.status = OperationStatus.PROCESSING
+        session.add(
+            DispatchIntent(
+                operation_id=operation_id,
+            )
+        )
+        session.add(
+            OperationEvent(
+                operation_id=operation_id,
+                event_id=event_id,
+                type=OperationStatus.PROCESSING,
+                from_status=OperationStatus.CREATED,
+                to_status=OperationStatus.PROCESSING,
+                message="Operation submitted",
+            )
+        )
     return operation
 
 

@@ -50,6 +50,9 @@ class Operation(Base):
     events: Mapped[list[OperationEvent]] = relationship(
         back_populates="operation", cascade="all, delete-orphan"
     )
+    dispatch_intent: Mapped[DispatchIntent | None] = relationship(
+        back_populates="operation", cascade="all, delete-orphan"
+    )
 
 
 class OperationEvent(Base):
@@ -68,3 +71,17 @@ class OperationEvent(Base):
     )
 
     operation: Mapped[Operation] = relationship(back_populates="events")
+
+
+class DispatchIntent(Base):
+    __tablename__ = "dispatch_intents"
+
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("operations.operation_id", ondelete="CASCADE"), primary_key=True
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    operation: Mapped[Operation] = relationship(back_populates="dispatch_intent")

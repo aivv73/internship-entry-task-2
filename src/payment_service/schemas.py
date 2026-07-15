@@ -49,3 +49,13 @@ class OperationEventResponse(BaseModel):
     to_status: str
     message: str
     occurred_at: datetime
+
+
+class ReceiptRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    provider_payment_id: str
+    operation_id: OperationId
+    result: Literal["COMPLETED"]
+    message: str
+    occurred_at: datetime

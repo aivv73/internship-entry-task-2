@@ -1,8 +1,8 @@
 # REQ-service-foundation: Service readiness and operation records
 
 The internship assignment in the root `README.md` is the external authority for this record. Its API
-routes and success statuses are mandatory and may not be renamed. GitHub issues #2 and #3 narrow the
-implemented foundation without weakening that authority.
+routes and success statuses are mandatory and may not be renamed. GitHub issues #2, #3, and #4
+narrow the implemented foundation without weakening that authority.
 
 ## Readiness obligation
 
@@ -27,9 +27,23 @@ must support startup through Docker Compose.
 - Operation state and event history must survive application replacement while PostgreSQL data is
   retained.
 
+## Initial dispatch obligations
+
+- The first `POST /operations/{id}/submit` must atomically store one durable send intent, change
+  `CREATED` to `PROCESSING`, append the transition event, and return `202 Accepted`.
+- Repeated submit must create no additional intent or transition and return the current state with
+  `200 OK`.
+- The provider request must use the configured provider URL, immutable operation ID, amount, and
+  currency. `Idempotency-Key` and `X-Correlation-ID` must both equal `operationId`.
+- Provider HTTP must occur after the intent commits and without holding an operation lock.
+- A provider `202 Accepted` may establish `providerPaymentId` but must not finalize the operation.
+- A matching `COMPLETED` receipt must atomically finalize `PROCESSING` and append its event, returning
+  `204 No Content`.
+
 The assignment remains the authority for provider submission, receipts, retries, and recovery
 requirements that are not duplicated in this initial record set.
 
 [SPEC-readiness](SPEC-readiness.md) refines the readiness behavior.
 [SPEC-operation-records](SPEC-operation-records.md) refines operation creation and inspection.
-Both run within [ARCH-payment-service](ARCH-payment-service.md).
+[SPEC-durable-dispatch](SPEC-durable-dispatch.md) refines initial submission, dispatch, and receipt
+behavior. All run within [ARCH-payment-service](ARCH-payment-service.md).

@@ -1,20 +1,24 @@
 # ARCH-payment-service: Payment service architecture
 
 The payment service is a single Python application that owns payment-operation state and exposes
-HTTP interfaces for readiness, operation creation, current-state reads, and event-history reads.
+HTTP interfaces for readiness, operation creation and submission, receipt callbacks, current-state
+reads, and event-history reads.
 PostgreSQL is the authoritative durable store. The current system does not derive authoritative
 state from process memory.
 
 The application is packaged as `candidate-service` and listens on port 8080. Docker Compose places
 it beside PostgreSQL and supplies `DATABASE_URL` and `PROVIDER_URL`. The provider address is part of
-runtime configuration, but the current code has no outbound provider adapter or receipt endpoint.
-Those capabilities remain tracked outside Linked Specs until they become current behavior.
+runtime configuration and is called by a background dispatch worker.
 
 ## Components and boundaries
 
 - **FastAPI application:** owns process lifespan, HTTP routing, dependency wiring, and readiness.
 - **Operation API:** validates the public JSON contract and coordinates transactional creation and
-  read-only queries.
+  submission plus read-only queries.
+- **Receipt API:** applies provider-confirmed completion in the same transaction as its event.
+- **Dispatch worker:** claims durable send intents, calls the provider outside the claim transaction,
+  and persists accepted provider identifiers.
+- **Provider adapter:** owns the external HTTP request and its idempotency and correlation headers.
 - **Persistence model:** represents operations and their ordered state-transition events.
 - **Database adapter:** owns the async SQLAlchemy engine, session factory, readiness probe, and
   shutdown disposal.
@@ -32,6 +36,14 @@ Creating an operation validates the request before opening a transaction. One da
 inserts the operation in `CREATED` and its initial event. A uniqueness failure rolls back both
 records and becomes `409 Conflict`.
 
+Submitting a `CREATED` operation locks it for a short transaction that creates one dispatch intent,
+changes the operation to `PROCESSING`, and appends the transition event. The worker claims that
+intent in a separate transaction, releases database locks, and then calls the provider. A provider
+`202 Accepted` stores `providerPaymentId` but leaves the operation in `PROCESSING`.
+
+A matching `COMPLETED` receipt locks the operation and atomically changes its state and appends the
+completion event. Provider transport success alone never establishes a final state.
+
 Reading an operation or its events opens a short-lived session. Event history is ordered by the
 per-operation `eventId`. Readiness executes a database query and cannot report ready when
 PostgreSQL is unavailable.
@@ -40,6 +52,9 @@ PostgreSQL is unavailable.
 
 - PostgreSQL is the sole durable source of truth.
 - An operation and the event describing its creation commit or roll back together.
+- A send intent, `PROCESSING` transition, and corresponding event commit or roll back together.
+- Provider HTTP occurs only after the send-intent transaction commits and holds no operation lock.
+- Only a callback receipt can establish a final operation state.
 - `operationId` is globally unique within the service.
 - Event identity is unique within an operation and histories are returned in ascending `eventId`
   order.
@@ -51,4 +66,6 @@ The platform choice and rationale are recorded in
 currently implemented surface are captured by
 [REQ-service-foundation](REQ-service-foundation.md). Behavioral details are refined by
 [SPEC-readiness](SPEC-readiness.md) and
-[SPEC-operation-records](SPEC-operation-records.md).
+[SPEC-operation-records](SPEC-operation-records.md). Durable dispatch is governed by
+[DESIGN-durable-dispatch-intent](DESIGN-durable-dispatch-intent.md) and refined by
+[SPEC-durable-dispatch](SPEC-durable-dispatch.md).

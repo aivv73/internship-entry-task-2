@@ -9,9 +9,8 @@ PostgreSQL as its persistent store.
 
 The assignment requires correctness under concurrent requests, ambiguous network outcomes, and
 process restarts. PostgreSQL transactions and constraints provide a durable coordination boundary
-for operation state and event history. Async database and HTTP-capable application infrastructure
-allows later provider calls to avoid blocking the service process while preserving short database
-transactions.
+for operation state and event history. Async database and HTTP infrastructure allows provider calls
+to avoid blocking the service process while preserving short database transactions.
 
 Alembic makes the persisted model reproducible in containers and tests. FastAPI and Pydantic keep
 the required JSON contract explicit while allowing integration tests to exercise the ASGI boundary
