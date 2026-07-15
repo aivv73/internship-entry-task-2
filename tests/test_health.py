@@ -2,11 +2,14 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from payment_service.main import create_app
 
 
 class StubDatabase:
+    sessions: async_sessionmaker[AsyncSession]
+
     def __init__(self, *, is_reachable: bool) -> None:
         self.is_reachable = is_reachable
 

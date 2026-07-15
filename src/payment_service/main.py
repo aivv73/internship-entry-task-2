@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from payment_service.config import Settings, get_settings
 from payment_service.database import Database, SqlAlchemyDatabase
+from payment_service.operations import router as operations_router
 
 
 def create_app(*, database: Database | None = None, settings: Settings | None = None) -> FastAPI:
@@ -20,6 +21,7 @@ def create_app(*, database: Database | None = None, settings: Settings | None = 
     app = FastAPI(title="Payment Service", lifespan=lifespan)
     app.state.database = service_database
     app.state.settings = service_settings
+    app.include_router(operations_router)
 
     @app.get("/health")
     async def health() -> JSONResponse:

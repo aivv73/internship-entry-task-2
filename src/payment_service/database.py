@@ -2,10 +2,17 @@ from typing import Protocol
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 
 class Database(Protocol):
+    sessions: async_sessionmaker[AsyncSession]
+
     async def is_ready(self) -> bool: ...
 
     async def close(self) -> None: ...
@@ -14,6 +21,7 @@ class Database(Protocol):
 class SqlAlchemyDatabase:
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
+        self.sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     @classmethod
     def from_url(cls, database_url: str) -> SqlAlchemyDatabase:
