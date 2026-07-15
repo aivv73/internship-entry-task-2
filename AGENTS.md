@@ -13,3 +13,6 @@ Use the canonical triage roles and matching GitHub label names. See `docs/agents
 ### Domain docs
 
 This is a single-context repository using a root `CONTEXT.md` and system-wide ADRs in `docs/adr/` when those documents are needed. See `docs/agents/domain.md`.
+
+This project uses the Linked Specs convention; consult the `linked-specs`
+skill before working with specs or governed code.
