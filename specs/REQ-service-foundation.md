@@ -1,8 +1,9 @@
 # REQ-service-foundation: Service readiness and operation records
 
-The internship assignment in the root `README.md` is the external authority for this record. Its API
-routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #9 narrow
-the implemented foundation without weakening that authority.
+The internship assignment captured by GitHub issue #1 is the external authority for this record.
+Its API routes and success statuses are mandatory and may not be renamed. The root `README.md` is the
+reviewer and operator guide; GitHub issues #2 through #9 narrow the implemented foundation without
+weakening the assignment authority.
 
 ## Readiness obligation
 
