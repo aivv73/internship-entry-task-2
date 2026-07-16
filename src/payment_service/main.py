@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from payment_service.config import Settings, get_settings
 from payment_service.database import Database, SqlAlchemyDatabase
-from payment_service.dispatcher import DispatchWorker
+from payment_service.dispatcher import DispatchPolicy, DispatchWorker
 from payment_service.operations import router as operations_router
 from payment_service.provider import ProviderClient
 from payment_service.receipts import router as receipts_router
@@ -18,7 +18,7 @@ def create_app(
     database: Database | None = None,
     settings: Settings | None = None,
     provider_transport: httpx.AsyncBaseTransport | None = None,
-    worker_poll_interval: float = 0.25,
+    worker_poll_interval: float | None = None,
 ) -> FastAPI:
     service_settings = settings or get_settings()
     service_database = database or SqlAlchemyDatabase.from_url(str(service_settings.database_url))
@@ -28,13 +28,25 @@ def create_app(
         service_provider = ProviderClient(
             httpx.AsyncClient(
                 base_url=str(service_settings.provider_url).rstrip("/"),
-                timeout=10,
+                timeout=float(service_settings.provider_timeout_seconds),
                 transport=provider_transport,
                 trust_env=False,
             )
         )
         dispatch_worker = DispatchWorker(
-            service_database, service_provider, poll_interval=worker_poll_interval
+            service_database,
+            service_provider,
+            policy=DispatchPolicy(
+                poll_interval=(
+                    worker_poll_interval
+                    if worker_poll_interval is not None
+                    else float(service_settings.dispatch_poll_interval_seconds)
+                ),
+                retry_base_delay=float(service_settings.dispatch_retry_base_delay_seconds),
+                retry_max_delay=float(service_settings.dispatch_retry_max_delay_seconds),
+                retry_jitter_ratio=service_settings.dispatch_retry_jitter_ratio,
+                claim_timeout=float(service_settings.dispatch_claim_timeout_seconds),
+            ),
         )
         dispatch_worker.start()
         try:

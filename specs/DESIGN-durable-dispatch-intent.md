@@ -25,5 +25,15 @@ idempotency together prevent duplicate effects; neither an in-memory queue nor a
 treated as authoritative. Workers atomically select due intents with row locks and skip intents
 already locked by another worker, then commit the claim before provider I/O.
 
+Ambiguous failures reuse the same intent. The database stores attempt count and next-attempt time;
+exponential delay with jitter is capped by configuration. A claim timestamp acts as a lease so work
+survives abrupt process loss, while graceful cancellation clears the claim for immediate pickup.
+Provider timeout is configured below the lease duration to avoid routine overlapping attempts.
+Lease and schedule timestamps derive from PostgreSQL's clock because the database coordinates all
+worker instances.
+
+This remains at-least-once HTTP delivery. Stable provider idempotency keys, rather than a database
+transaction spanning the network, prevent repeated delivery from creating another provider payment.
+
 The worker boundary is described by [ARCH-payment-service](ARCH-payment-service.md), and current
 behavior is specified by [SPEC-durable-dispatch](SPEC-durable-dispatch.md).

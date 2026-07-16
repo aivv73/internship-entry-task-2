@@ -153,6 +153,15 @@ async def test_migrations_create_operation_and_event_schema(
         "operation_primary_key": ["operation_id"],
         "event_primary_key": ["operation_id", "event_id"],
         "intent_primary_key": ["operation_id"],
+        "intent_columns": {
+            "operation_id",
+            "attempt_count",
+            "created_at",
+            "next_attempt_at",
+            "claimed_at",
+            "dispatched_at",
+        },
+        "intent_indexes": {"ix_dispatch_intents_due"},
     }
 
 
@@ -178,4 +187,6 @@ def read_operation_schema(connection: Connection) -> dict[str, object]:
         "intent_primary_key": inspector.get_pk_constraint("dispatch_intents")[
             "constrained_columns"
         ],
+        "intent_columns": {column["name"] for column in inspector.get_columns("dispatch_intents")},
+        "intent_indexes": {index["name"] for index in inspector.get_indexes("dispatch_intents")},
     }

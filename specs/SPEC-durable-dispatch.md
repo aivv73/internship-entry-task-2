@@ -21,9 +21,10 @@ state, return `200`, and add nothing.
 ## Dispatch
 
 The application lifespan owns one background dispatch worker. The worker claims one unclaimed,
-undispatched intent in a short transaction, records its claim and attempt count, and copies the
-immutable operation ID, decimal amount, and currency. It then releases the transaction before
-calling `POST {PROVIDER_URL}/payments`.
+due, undispatched intent in a short transaction, records its claim and incremented attempt count,
+and copies the immutable operation ID, decimal amount, and currency. A claim whose timestamp exceeds
+the configured lease is also eligible. The worker releases the transaction before calling
+`POST {PROVIDER_URL}/payments`.
 
 When worker loops in multiple application instances compete, `FOR UPDATE SKIP LOCKED` makes each
 claim atomic and prevents a locked intent from being selected twice. Claim commit precedes provider
@@ -37,6 +38,23 @@ Acceptance stores a consistent provider ID and marks the intent dispatched in on
 transaction. It does not change operation status or append an event. The operation remains
 `PROCESSING` unless an earlier receipt already finalized it; a late response never restores
 `PROCESSING` or otherwise changes a final result.
+
+Any transport exception or response other than an accepted `202` leaves operation status unchanged.
+The worker releases its claim and persists `next_attempt_at` using capped exponential backoff. For
+attempt number `n`, the pre-jitter delay is `min(maxDelay, baseDelay * 2^(n-1))`; configured jitter
+selects a value between `(1-jitterRatio)` and `1` times that delay. Every later attempt reconstructs
+the same body and headers from immutable operation data.
+
+The runtime timing settings are `PROVIDER_TIMEOUT_SECONDS`, `DISPATCH_POLL_INTERVAL_SECONDS`,
+`DISPATCH_RETRY_BASE_DELAY_SECONDS`, `DISPATCH_RETRY_MAX_DELAY_SECONDS`,
+`DISPATCH_RETRY_JITTER_RATIO`, and `DISPATCH_CLAIM_TIMEOUT_SECONDS`. Base delay may not exceed maximum
+delay, claim timeout must exceed provider timeout, and every duration must be finite, positive, and
+no greater than one day so persisted schedule arithmetic remains representable.
+
+Graceful worker shutdown stops polling, cancels provider I/O, and clears the current claim with an
+immediately due schedule. If the process cannot do that cleanup, a later worker reclaims the intent
+after lease expiry. Claim, expiry, dispatch, and next-attempt timestamps use PostgreSQL's clock.
+Startup requires no reconstruction step beyond polling persisted due work.
 
 ## Final receipt
 
@@ -62,12 +80,6 @@ linkage, or event changes. PostgreSQL uniqueness permits a provider ID to belong
 operation; an attempted cross-operation link also returns `409` and rolls back the complete receipt.
 Unknown operations return `404`, and validation rejects results outside the two final statuses before
 opening the transaction.
-
-## Current exceptions
-
-Provider failures and interrupted claims are logged but are not yet retried or recovered. This is a
-known, scoped divergence from the root assignment tracked by the dependent dispatch-recovery ticket;
-it is not permission to treat recovery behavior as complete.
 
 Operation representations and event history remain governed by
 [SPEC-operation-records](SPEC-operation-records.md).

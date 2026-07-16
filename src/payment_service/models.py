@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -75,12 +76,18 @@ class OperationEvent(Base):
 
 class DispatchIntent(Base):
     __tablename__ = "dispatch_intents"
+    __table_args__ = (
+        Index("ix_dispatch_intents_due", "dispatched_at", "next_attempt_at", "claimed_at"),
+    )
 
     operation_id: Mapped[str] = mapped_column(
         ForeignKey("operations.operation_id", ondelete="CASCADE"), primary_key=True
     )
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

@@ -1,7 +1,7 @@
 # REQ-service-foundation: Service readiness and operation records
 
 The internship assignment in the root `README.md` is the external authority for this record. Its API
-routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #6 narrow
+routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #7 narrow
 the implemented foundation without weakening that authority.
 
 ## Readiness obligation
@@ -63,6 +63,19 @@ must support startup through Docker Compose.
   after claim commit, and callbacks must remain able to commit while a provider response is open.
 - The provider must observe one payment effect for the operation, with the stable operation ID as
   both idempotency and correlation key and one immutable request body.
+
+## Dispatch recovery obligations
+
+- Provider `503` responses, connection failures, timeouts, and lost responses must leave the
+  operation `PROCESSING` and schedule another delivery of the same request identity and body.
+- Attempt count and next-attempt time must persist in PostgreSQL. Retry delay must use configurable
+  exponential backoff with jitter and a bounded maximum.
+- Startup must resume due intents and reclaim expired interrupted claims. Graceful shutdown must stop
+  polling and release in-flight work for recovery.
+- A late accepted response may persist consistent linkage and dispatch completion but cannot change
+  a callback-established final result. No provider transport outcome may fabricate a final status.
+- Repeated delivery after a lost response relies on the stable provider idempotency key and must not
+  produce another provider payment effect.
 
 The assignment remains the authority for provider submission, receipts, retries, and recovery
 requirements that are not duplicated in this initial record set.

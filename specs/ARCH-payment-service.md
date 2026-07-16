@@ -19,7 +19,7 @@ coordinate submissions and worker claims through PostgreSQL rather than process-
 - **Receipt API:** applies either provider-confirmed final result or audits an ignored opposite result
   in the same transaction as its event.
 - **Dispatch worker:** claims durable send intents, calls the provider outside the claim transaction,
-  and persists accepted provider identifiers.
+  persists accepted provider identifiers, and durably reschedules ambiguous failures.
 - **Provider adapter:** owns the external HTTP request and its idempotency and correlation headers.
 - **Persistence model:** represents operations and their ordered transition and receipt-audit events.
 - **Database adapter:** owns the async SQLAlchemy engine, session factory, readiness probe, and
@@ -48,6 +48,13 @@ Concurrent submits serialize on the operation row, so exactly one request perfor
 Competing workers use row locking with locked-row skipping, so at most one claims an intent while
 other workers remain free to claim different work.
 
+Each claim increments a durable attempt count. Transport failures and non-accepted responses release
+the claim and set a durable future attempt time without changing operation status. Graceful shutdown
+releases an in-flight claim immediately; after an abrupt interruption, the claim lease expires and a
+worker can reclaim it. Application startup polls the same persisted due intents, so no separate
+in-memory recovery source exists. PostgreSQL time is authoritative for claim leases and retry due
+times, avoiding coordination dependence on application-host clock agreement.
+
 A `COMPLETED` or `REJECTED` receipt locks the operation and atomically establishes a missing
 provider linkage, changes its state, and appends the final transition event. Provider transport
 success alone never establishes a final state. Equivalent receipts are no-ops; an opposite later
@@ -64,6 +71,8 @@ PostgreSQL is unavailable.
 - A send intent, `PROCESSING` transition, and corresponding event commit or roll back together.
 - Concurrent submits create one intent and one transition, independent of the serving instance.
 - Competing worker loops cannot claim the same intent concurrently.
+- Retry attempt and schedule metadata survive process and container replacement.
+- Unfinished claims are recoverable through graceful release or lease expiry.
 - Provider HTTP occurs only after the send-intent transaction commits and holds no operation lock.
 - Only a callback receipt can establish a final operation state.
 - The first valid final receipt wins; equivalent delivery is idempotent and opposite delivery is
