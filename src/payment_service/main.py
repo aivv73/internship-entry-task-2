@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from payment_service.config import Settings, get_settings
 from payment_service.database import Database, SqlAlchemyDatabase
 from payment_service.dispatcher import DispatchPolicy, DispatchWorker
+from payment_service.metrics import router as metrics_router
+from payment_service.observability import PaymentMetrics, configure_payment_logging
 from payment_service.operations import router as operations_router
 from payment_service.provider import ProviderClient
 from payment_service.receipts import router as receipts_router
@@ -19,9 +21,12 @@ def create_app(
     settings: Settings | None = None,
     provider_transport: httpx.AsyncBaseTransport | None = None,
     worker_poll_interval: float | None = None,
+    payment_metrics: PaymentMetrics | None = None,
 ) -> FastAPI:
+    configure_payment_logging()
     service_settings = settings or get_settings()
     service_database = database or SqlAlchemyDatabase.from_url(str(service_settings.database_url))
+    service_metrics = payment_metrics or PaymentMetrics()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -47,6 +52,7 @@ def create_app(
                 retry_jitter_ratio=service_settings.dispatch_retry_jitter_ratio,
                 claim_timeout=float(service_settings.dispatch_claim_timeout_seconds),
             ),
+            metrics=service_metrics,
         )
         dispatch_worker.start()
         try:
@@ -59,8 +65,10 @@ def create_app(
     app = FastAPI(title="Payment Service", lifespan=lifespan)
     app.state.database = service_database
     app.state.settings = service_settings
+    app.state.payment_metrics = service_metrics
     app.include_router(operations_router)
     app.include_router(receipts_router)
+    app.include_router(metrics_router)
 
     @app.get("/health")
     async def health() -> JSONResponse:

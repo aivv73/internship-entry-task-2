@@ -82,4 +82,5 @@ Unknown operations return `404`, and validation rejects results outside the two 
 opening the transaction.
 
 Operation representations and event history remain governed by
-[SPEC-operation-records](SPEC-operation-records.md).
+[SPEC-operation-records](SPEC-operation-records.md). Dispatch and receipt observability is governed
+by [SPEC-payment-observability](SPEC-payment-observability.md).

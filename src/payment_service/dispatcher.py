@@ -7,10 +7,12 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import httpx
 from sqlalchemy import func, or_, select
 
 from payment_service.database import Database
 from payment_service.models import DispatchIntent, Operation
+from payment_service.observability import PaymentMetrics, safely_log, safely_observe
 from payment_service.provider import PaymentRequest, ProviderClient
 
 logger = logging.getLogger(__name__)
@@ -43,12 +45,13 @@ class DispatchPolicy:
             raise ValueError("retry jitter ratio must be between zero and one")
 
 
-@dataclass(frozen=True)
+@dataclass
 class ClaimedDispatch:
     operation_id: str
     payment: PaymentRequest
     attempt_count: int
     claimed_at: datetime
+    provider_payment_id: str | None
 
 
 def retry_delay(policy: DispatchPolicy, attempt_count: int, random_fraction: float) -> float:
@@ -69,11 +72,13 @@ class DispatchWorker:
         provider: ProviderClient,
         *,
         policy: DispatchPolicy,
+        metrics: PaymentMetrics,
         random_fraction: Callable[[], float] = random.random,
     ) -> None:
         self._database = database
         self._provider = provider
         self._policy = policy
+        self._metrics = metrics
         self._random_fraction = random_fraction
         self._stopped = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -106,15 +111,45 @@ class DispatchWorker:
         claimed = await self._claim_intent()
         if claimed is None:
             return False
+        safely_observe(self._metrics.provider_attempts.inc)
+        if claimed.attempt_count > 1:
+            safely_observe(self._metrics.provider_retries.inc)
+        safely_log(
+            logger,
+            logging.INFO,
+            "provider dispatch started",
+            operationId=claimed.operation_id,
+            providerPaymentId=claimed.provider_payment_id,
+            attempt=claimed.attempt_count,
+            outcome="started",
+        )
         try:
             await self._deliver_claimed(claimed)
         except asyncio.CancelledError:
+            safely_observe(
+                lambda: self._metrics.dispatch_outcomes.labels(outcome="cancelled").inc()
+            )
+            safely_log(
+                logger,
+                logging.INFO,
+                "provider dispatch cancelled",
+                operationId=claimed.operation_id,
+                providerPaymentId=claimed.provider_payment_id,
+                attempt=claimed.attempt_count,
+                outcome="cancelled",
+            )
             try:
                 await asyncio.shield(self._release_interrupted_claim(claimed))
             except Exception:
-                logger.exception(
+                safely_log(
+                    logger,
+                    logging.ERROR,
                     "failed to release interrupted dispatch",
-                    extra={"operationId": claimed.operation_id, "attempt": claimed.attempt_count},
+                    exc_info=True,
+                    operationId=claimed.operation_id,
+                    providerPaymentId=claimed.provider_payment_id,
+                    attempt=claimed.attempt_count,
+                    outcome="error",
                 )
             raise
         return True
@@ -122,20 +157,45 @@ class DispatchWorker:
     async def _deliver_claimed(self, claimed: ClaimedDispatch) -> None:
         try:
             provider_payment_id = await self._provider.create_payment(claimed.payment)
+            claimed.provider_payment_id = provider_payment_id
             await self._record_acceptance(claimed.operation_id, provider_payment_id)
+            safely_observe(lambda: self._metrics.dispatch_outcomes.labels(outcome="accepted").inc())
+            safely_log(
+                logger,
+                logging.INFO,
+                "provider dispatch accepted",
+                operationId=claimed.operation_id,
+                providerPaymentId=provider_payment_id,
+                attempt=claimed.attempt_count,
+                outcome="accepted",
+            )
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception(
+        except Exception as error:
+            outcome = dispatch_failure_outcome(error)
+            safely_observe(lambda: self._metrics.dispatch_outcomes.labels(outcome=outcome).inc())
+            safely_log(
+                logger,
+                logging.ERROR,
                 "provider dispatch failed",
-                extra={"operationId": claimed.operation_id, "attempt": claimed.attempt_count},
+                exc_info=True,
+                operationId=claimed.operation_id,
+                providerPaymentId=claimed.provider_payment_id,
+                attempt=claimed.attempt_count,
+                outcome=outcome,
             )
             try:
                 await self._schedule_retry(claimed)
             except Exception:
-                logger.exception(
+                safely_log(
+                    logger,
+                    logging.ERROR,
                     "failed to schedule dispatch retry",
-                    extra={"operationId": claimed.operation_id, "attempt": claimed.attempt_count},
+                    exc_info=True,
+                    operationId=claimed.operation_id,
+                    providerPaymentId=claimed.provider_payment_id,
+                    attempt=claimed.attempt_count,
+                    outcome="error",
                 )
 
     async def _claim_intent(self) -> ClaimedDispatch | None:
@@ -175,6 +235,7 @@ class DispatchWorker:
                 payment=payment,
                 attempt_count=intent.attempt_count,
                 claimed_at=now,
+                provider_payment_id=operation.provider_payment_id,
             )
 
     async def _schedule_retry(self, claimed: ClaimedDispatch) -> None:
@@ -227,3 +288,11 @@ class DispatchWorker:
                 raise RuntimeError("provider payment ID does not match operation")
             operation.provider_payment_id = provider_payment_id
             intent.dispatched_at = now
+
+
+def dispatch_failure_outcome(error: Exception) -> str:
+    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 503:
+        return "unavailable"
+    if isinstance(error, httpx.TransportError):
+        return "transport_error"
+    return "error"

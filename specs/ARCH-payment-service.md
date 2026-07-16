@@ -2,7 +2,7 @@
 
 The payment service is a single Python application that owns payment-operation state and exposes
 HTTP interfaces for readiness, operation creation and submission, receipt callbacks, current-state
-reads, and event-history reads.
+reads, event-history reads, and Prometheus metrics.
 PostgreSQL is the authoritative durable store. The current system does not derive authoritative
 state from process memory.
 
@@ -21,6 +21,8 @@ coordinate submissions and worker claims through PostgreSQL rather than process-
 - **Dispatch worker:** claims durable send intents, calls the provider outside the claim transaction,
   persists accepted provider identifiers, and durably reschedules ambiguous failures.
 - **Provider adapter:** owns the external HTTP request and its idempotency and correlation headers.
+- **Observability adapter:** emits structured payment logs and bounded-cardinality metrics without
+  participating in authoritative transactions.
 - **Persistence model:** represents operations and their ordered transition and receipt-audit events.
 - **Database adapter:** owns the async SQLAlchemy engine, session factory, readiness probe, and
   shutdown disposal.
@@ -64,6 +66,10 @@ Reading an operation or its events opens a short-lived session. Event history is
 per-operation `eventId`. Readiness executes a database query and cannot report ready when
 PostgreSQL is unavailable.
 
+Metrics reads derive unfinished-operation counts from PostgreSQL and combine them with process-local
+dispatch and receipt counters. Payment logs are JSON objects correlated by operation ID. Metrics and
+logging failures are isolated from payment state changes and worker progress.
+
 ## Architectural invariants
 
 - PostgreSQL is the sole durable source of truth.
@@ -82,6 +88,8 @@ PostgreSQL is unavailable.
 - Event identity is unique within an operation and histories are returned in ascending `eventId`
   order.
 - Money is validated and stored as decimal data, never binary floating point.
+- Metric labels never contain operation or provider identifiers.
+- Observability is non-authoritative and cannot veto payment processing.
 - Database migrations run before the container starts serving traffic.
 
 The platform choice and rationale are recorded in
@@ -91,4 +99,5 @@ currently implemented surface are captured by
 [SPEC-readiness](SPEC-readiness.md) and
 [SPEC-operation-records](SPEC-operation-records.md). Durable dispatch is governed by
 [DESIGN-durable-dispatch-intent](DESIGN-durable-dispatch-intent.md) and refined by
-[SPEC-durable-dispatch](SPEC-durable-dispatch.md).
+[SPEC-durable-dispatch](SPEC-durable-dispatch.md). Logs and metrics are specified by
+[SPEC-payment-observability](SPEC-payment-observability.md).

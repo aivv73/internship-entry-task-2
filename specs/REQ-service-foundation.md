@@ -1,7 +1,7 @@
 # REQ-service-foundation: Service readiness and operation records
 
 The internship assignment in the root `README.md` is the external authority for this record. Its API
-routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #7 narrow
+routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #8 narrow
 the implemented foundation without weakening that authority.
 
 ## Readiness obligation
@@ -77,10 +77,20 @@ must support startup through Docker Compose.
 - Repeated delivery after a lost response relies on the stable provider idempotency key and must not
   produce another provider payment effect.
 
+## Observability obligations
+
+- Payment logs must be structured and correlate provider attempts and callbacks by `operationId`,
+  including available provider linkage and retry attempt where relevant.
+- `GET /metrics` must return Prometheus-compatible backlog, provider attempt/retry/outcome, and
+  ignored/conflicting receipt metrics.
+- Metric labels must have bounded cardinality and may not contain operation or provider identifiers.
+- Logging and metrics failures must not change payment state or prevent processing.
+
 The assignment remains the authority for provider submission, receipts, retries, and recovery
 requirements that are not duplicated in this initial record set.
 
 [SPEC-readiness](SPEC-readiness.md) refines the readiness behavior.
 [SPEC-operation-records](SPEC-operation-records.md) refines operation creation and inspection.
 [SPEC-durable-dispatch](SPEC-durable-dispatch.md) refines initial submission, dispatch, and receipt
-behavior. All run within [ARCH-payment-service](ARCH-payment-service.md).
+behavior. [SPEC-payment-observability](SPEC-payment-observability.md) refines logs and metrics. All
+run within [ARCH-payment-service](ARCH-payment-service.md).
