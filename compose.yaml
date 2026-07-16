@@ -22,6 +22,17 @@ services:
       retries: 5
       start_period: 5s
 
+  provider-simulator:
+    image: ghcr.io/fintech-dev-lab/internship-provider-simulator:v0.2.0
+    environment:
+      CALLBACK_URL: http://candidate-service:8080/receipts
+      SIMULATOR_MODE: ${SIMULATOR_MODE:-success}
+    ports:
+      - "8081:8081"
+    depends_on:
+      candidate-service:
+        condition: service_healthy
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -33,7 +44,7 @@ services:
     volumes:
       - candidate-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U payment -d payments"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U payment -d payments"]
       interval: 2s
       timeout: 3s
       retries: 30

@@ -1,27 +1,176 @@
 # Вступительное задание: «Платёж прошёл? Докажи»
 
-## Разработка сервиса
+## Руководство проверяющего
 
-Требования: Python 3.14, [uv](https://docs.astral.sh/uv/) и Docker с Compose.
+Требования: Docker с Compose, `curl`; для запуска тестов также нужны Python 3.14 и
+[uv](https://docs.astral.sh/uv/). В Compose запускаются `candidate-service`, PostgreSQL и неизменённый
+`ghcr.io/fintech-dev-lab/internship-provider-simulator:v0.2.0`. Миграции Alembic применяются до
+запуска HTTP-сервера кандидата.
 
-Установка зависимостей и запуск тестов:
+### Чистый запуск
+
+```bash
+git clone https://github.com/aivv73/internship-entry-task-2.git
+cd internship-entry-task-2
+SIMULATOR_MODE=success docker compose up --build --detach --wait
+docker compose ps
+curl -i http://localhost:8080/health
+curl -sS http://localhost:8080/metrics
+```
+
+Кандидат доступен на `localhost:8080`, реальный симулятор — на `localhost:8081`. Симулятор вызывает
+`http://candidate-service:8080/receipts`, а кандидат отправляет платежи на
+`http://provider-simulator:8081` внутри общей Compose-сети.
+
+### Сквозной результат `COMPLETED`
+
+```bash
+OP="review-completed-$(date +%s)-$RANDOM"
+curl -sS -X POST http://localhost:8080/operations \
+  -H 'Content-Type: application/json' \
+  -d "{\"operationId\":\"$OP\",\"amount\":\"1000.00\",\"currency\":\"RUB\",\"description\":\"Reviewer success\"}"
+curl -i -X POST "http://localhost:8080/operations/$OP/submit"
+for _ in $(seq 1 60); do
+  RESPONSE=$(curl -fsS "http://localhost:8080/operations/$OP")
+  printf '%s\n' "$RESPONSE"
+  printf '%s' "$RESPONSE" | grep -q '"status":"COMPLETED"' && break
+  sleep 1
+done
+printf '%s' "$RESPONSE" | grep -q '"status":"COMPLETED"' &&
+  curl -sS "http://localhost:8080/operations/$OP/events" &&
+  docker compose logs provider-simulator | grep "\"operationId\":\"$OP\""
+```
+
+Последний ответ операции содержит `"status":"COMPLETED"`. В аудите симулятора ровно одна запись
+нового платежа (`replay:false`):
+
+```bash
+docker compose logs provider-simulator \
+  | grep '"msg":"payment accepted"' \
+  | grep "\"operationId\":\"$OP\"" \
+  | grep -c '"replay":false'
+```
+
+Команда печатает `1`.
+
+### Сквозной результат `REJECTED`
+
+Режим симулятора выбирается только при старте контейнера, поэтому его нужно пересоздать:
+
+```bash
+SIMULATOR_MODE=reject docker compose up --detach --force-recreate provider-simulator
+OP="review-rejected-$(date +%s)-$RANDOM"
+curl -sS -X POST http://localhost:8080/operations \
+  -H 'Content-Type: application/json' \
+  -d "{\"operationId\":\"$OP\",\"amount\":\"250.00\",\"currency\":\"RUB\",\"description\":\"Reviewer rejection\"}"
+curl -i -X POST "http://localhost:8080/operations/$OP/submit"
+for _ in $(seq 1 60); do
+  RESPONSE=$(curl -fsS "http://localhost:8080/operations/$OP")
+  printf '%s\n' "$RESPONSE"
+  printf '%s' "$RESPONSE" | grep -q '"status":"REJECTED"' && break
+  sleep 1
+done
+printf '%s' "$RESPONSE" | grep -q '"status":"REJECTED"' &&
+  curl -sS "http://localhost:8080/operations/$OP/events" &&
+  docker compose logs provider-simulator | grep "\"operationId\":\"$OP\""
+```
+
+Операция получает `"status":"REJECTED"`; результат установлен callback-квитанцией, а не HTTP-ответом
+на создание платежа.
+
+### Конкурентная отправка и аудит одного платежа
+
+```bash
+SIMULATOR_MODE=success docker compose up --detach --force-recreate provider-simulator
+OP="review-concurrent-$(date +%s)-$RANDOM"
+curl -sS -X POST http://localhost:8080/operations \
+  -H 'Content-Type: application/json' \
+  -d "{\"operationId\":\"$OP\",\"amount\":\"500.00\",\"currency\":\"RUB\"}"
+seq 1 16 | xargs -P16 -I{} curl -sS -o /dev/null -w '%{http_code}\n' \
+  -X POST "http://localhost:8080/operations/$OP/submit"
+for _ in $(seq 1 60); do
+  RESPONSE=$(curl -fsS "http://localhost:8080/operations/$OP")
+  printf '%s\n' "$RESPONSE"
+  printf '%s' "$RESPONSE" | grep -q '"status":"COMPLETED"' && break
+  sleep 1
+done
+printf '%s' "$RESPONSE" | grep -q '"status":"COMPLETED"' &&
+  curl -sS "http://localhost:8080/operations/$OP/events" &&
+  docker compose logs provider-simulator \
+    | grep '"msg":"payment accepted"' \
+    | grep "\"operationId\":\"$OP\"" \
+    | grep -c '"replay":false'
+```
+
+Коды содержат один `202` и пятнадцать `200`; аудит снова печатает `1`.
+
+### Перезапуск, восстановление и сохранность данных
+
+Сначала остановим провайдера, чтобы намерение гарантированно осталось незавершённым, затем заменим
+процесс кандидата и вернём провайдера:
+
+```bash
+docker compose stop provider-simulator
+OP="review-recovery-$(date +%s)-$RANDOM"
+curl -sS -X POST http://localhost:8080/operations \
+  -H 'Content-Type: application/json' \
+  -d "{\"operationId\":\"$OP\",\"amount\":\"750.00\",\"currency\":\"RUB\"}"
+curl -i -X POST "http://localhost:8080/operations/$OP/submit"
+docker compose restart candidate-service
+docker compose start provider-simulator
+for _ in $(seq 1 60); do
+  RESPONSE=$(curl -fsS "http://localhost:8080/operations/$OP" 2>/dev/null || true)
+  printf '%s\n' "$RESPONSE"
+  printf '%s' "$RESPONSE" | grep -q '"status":"COMPLETED"' && break
+  sleep 1
+done
+printf '%s' "$RESPONSE" | grep -q '"status":"COMPLETED"' &&
+  docker compose logs provider-simulator | grep "\"operationId\":\"$OP\""
+```
+
+Кандидат возобновляет сохранённое намерение с тем же ключом, операция завершается, а аудит содержит
+один новый платёж. Обычная остановка Compose не удаляет именованный том PostgreSQL:
+
+```bash
+docker compose down
+SIMULATOR_MODE=success docker compose up --build --detach --wait
+curl -sS "http://localhost:8080/operations/$OP"
+```
+
+Операция и её история остаются доступны после пересоздания контейнеров.
+
+### Тесты
 
 ```bash
 uv sync --dev
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-```
 
-Интеграционная проверка `/health` через настоящий PostgreSQL (URL должен использовать драйвер
-`postgresql+asyncpg`):
-
-```bash
 TEST_DATABASE_URL=postgresql+asyncpg://payment:payment@localhost:5432/payments \
   uv run pytest tests/integration
 ```
 
-Локальный запуск API при доступном PostgreSQL:
+Автоматический smoke-тест сам создаёт изолированный Compose-проект, вызывает реальный симулятор,
+проверяет конкурентные `submit`, callback, аудит единственного платежа и перезапуск кандидата. Порты
+должны быть свободны, поэтому сначала остановите основной стек:
+
+```bash
+docker compose down
+RUN_COMPOSE_SMOKE=1 uv run pytest tests/compose/test_real_provider.py -q
+```
+
+### Остановка и очистка
+
+```bash
+# Остановить контейнеры, сохранив PostgreSQL-том:
+docker compose down
+
+# Удалить контейнеры и все данные задания без возможности восстановления:
+docker compose down --volumes --remove-orphans
+```
+
+### Локальный запуск без Compose
 
 ```bash
 export DATABASE_URL=postgresql+asyncpg://payment:payment@localhost:5432/payments
@@ -29,17 +178,6 @@ export PROVIDER_URL=http://localhost:8081
 uv run alembic upgrade head
 uv run uvicorn payment_service.main:app --host 0.0.0.0 --port 8080
 ```
-
-Запуск контейнеров:
-
-```bash
-docker compose up --build
-curl -i http://localhost:8080/health
-docker compose down
-```
-
-PostgreSQL хранит данные в именованном томе `candidate-data`. Обычный `docker compose down`
-сохраняет том; для полного удаления данных используйте `docker compose down --volumes`.
 
 Нужно собрать сервис, который проводит платёжную операцию через внешнего провайдера и сохраняет корректное состояние при повторах, конкурентных запросах, потерянных HTTP-ответах и перезапусках.
 

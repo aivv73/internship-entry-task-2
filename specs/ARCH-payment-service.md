@@ -7,9 +7,11 @@ PostgreSQL is the authoritative durable store. The current system does not deriv
 state from process memory.
 
 The application is packaged as `candidate-service` and listens on port 8080. Docker Compose places
-it beside PostgreSQL and supplies `DATABASE_URL` and `PROVIDER_URL`. The provider address is part of
-runtime configuration and is called by a background dispatch worker. Multiple application instances
-coordinate submissions and worker claims through PostgreSQL rather than process-local state.
+it beside PostgreSQL and the published provider simulator, supplies `DATABASE_URL` and
+`PROVIDER_URL`, and supplies the candidate callback URL to the simulator. The provider address is
+part of runtime configuration and is called by a background dispatch worker. Multiple application
+instances coordinate submissions and worker claims through PostgreSQL rather than process-local
+state.
 
 ## Components and boundaries
 
@@ -29,6 +31,8 @@ coordinate submissions and worker claims through PostgreSQL rather than process-
 - **Alembic migrations:** are the reproducible authority for PostgreSQL schema evolution.
 - **PostgreSQL:** owns committed operation data, uniqueness constraints, event ordering keys, and
   persistence across application instances.
+- **Compose deployment:** wires the candidate, final-server database readiness, named durable
+  volume, and unchanged real provider into one reviewer-runnable network.
 
 Dependencies point inward from HTTP and migration adapters toward the operation and persistence
 model. The application reaches PostgreSQL through async SQLAlchemy sessions; tests exercise the
@@ -70,6 +74,11 @@ Metrics reads derive unfinished-operation counts from PostgreSQL and combine the
 dispatch and receipt counters. Payment logs are JSON objects correlated by operation ID. Metrics and
 logging failures are isolated from payment state changes and worker progress.
 
+The Compose reviewer flow publishes the candidate and simulator on their assignment ports. Provider
+structured logs expose whether an accepted call created a payment or replayed its idempotency key;
+the automated smoke path uses those records as an external audit while treating PostgreSQL operation
+state as authoritative for the candidate.
+
 ## Architectural invariants
 
 - PostgreSQL is the sole durable source of truth.
@@ -91,6 +100,8 @@ logging failures are isolated from payment state changes and worker progress.
 - Metric labels never contain operation or provider identifiers.
 - Observability is non-authoritative and cannot veto payment processing.
 - Database migrations run before the container starts serving traffic.
+- Compose database readiness cannot succeed against PostgreSQL's temporary initialization server.
+- Ordinary Compose shutdown preserves the named PostgreSQL volume.
 
 The platform choice and rationale are recorded in
 [DESIGN-async-python-postgresql](DESIGN-async-python-postgresql.md). External obligations for the
@@ -100,4 +111,5 @@ currently implemented surface are captured by
 [SPEC-operation-records](SPEC-operation-records.md). Durable dispatch is governed by
 [DESIGN-durable-dispatch-intent](DESIGN-durable-dispatch-intent.md) and refined by
 [SPEC-durable-dispatch](SPEC-durable-dispatch.md). Logs and metrics are specified by
-[SPEC-payment-observability](SPEC-payment-observability.md).
+[SPEC-payment-observability](SPEC-payment-observability.md). Packaging and real-provider verification
+are refined by [SPEC-compose-reviewer-scenario](SPEC-compose-reviewer-scenario.md).

@@ -1,7 +1,7 @@
 # REQ-service-foundation: Service readiness and operation records
 
 The internship assignment in the root `README.md` is the external authority for this record. Its API
-routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #8 narrow
+routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #9 narrow
 the implemented foundation without weakening that authority.
 
 ## Readiness obligation
@@ -86,11 +86,26 @@ must support startup through Docker Compose.
 - Metric labels must have bounded cardinality and may not contain operation or provider identifiers.
 - Logging and metrics failures must not change payment state or prevent processing.
 
+## Packaging and reviewer-verification obligations
+
+- Docker Compose must place the candidate, PostgreSQL, and the published provider simulator v0.2.0
+  in one network, expose candidate port 8080 and provider port 8081, and supply their reciprocal
+  provider and callback URLs.
+- PostgreSQL must use a named volume that survives ordinary container replacement and Compose
+  shutdown. Startup readiness must not release migrations before final database initialization.
+- The candidate image must apply or verify all migrations before serving traffic.
+- The reviewer guide must provide reproducible commands for both final results, concurrent submit,
+  candidate restart and dispatch recovery, persistent reads after container replacement, provider
+  audit inspection, tests, startup, shutdown, and explicit destructive cleanup.
+- An environment-gated automated Compose smoke test must exercise the public candidate API through
+  the real provider and confirm one non-replay provider payment audit record for its operation.
+
 The assignment remains the authority for provider submission, receipts, retries, and recovery
 requirements that are not duplicated in this initial record set.
 
 [SPEC-readiness](SPEC-readiness.md) refines the readiness behavior.
 [SPEC-operation-records](SPEC-operation-records.md) refines operation creation and inspection.
 [SPEC-durable-dispatch](SPEC-durable-dispatch.md) refines initial submission, dispatch, and receipt
-behavior. [SPEC-payment-observability](SPEC-payment-observability.md) refines logs and metrics. All
-run within [ARCH-payment-service](ARCH-payment-service.md).
+behavior. [SPEC-payment-observability](SPEC-payment-observability.md) refines logs and metrics.
+[SPEC-compose-reviewer-scenario](SPEC-compose-reviewer-scenario.md) refines packaging and reviewer
+verification. All run within [ARCH-payment-service](ARCH-payment-service.md).
