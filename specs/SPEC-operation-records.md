@@ -43,8 +43,9 @@ Events expose `eventId`, `type`, `fromStatus`, `toStatus`, `message`, and `occur
 operation returns `404 Not Found` rather than an empty history.
 
 Event identity is the pair of operation ID and event ID. The first event is 1; later state changes
-must allocate increasing IDs while preserving transactionality. Submission, provider dispatch, and
-callback completion are specified by [SPEC-durable-dispatch](SPEC-durable-dispatch.md).
+must allocate increasing IDs while preserving transactionality. Submission, provider dispatch,
+callback finalization, and ignored-receipt audits are specified by
+[SPEC-durable-dispatch](SPEC-durable-dispatch.md).
 
 The persistence and HTTP boundaries are described by
 [ARCH-payment-service](ARCH-payment-service.md), and the selected platform is recorded in

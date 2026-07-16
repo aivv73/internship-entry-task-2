@@ -56,6 +56,6 @@ class ReceiptRequest(BaseModel):
 
     provider_payment_id: str
     operation_id: OperationId
-    result: Literal["COMPLETED"]
+    result: Literal["COMPLETED", "REJECTED"]
     message: str
     occurred_at: datetime

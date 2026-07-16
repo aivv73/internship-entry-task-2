@@ -1,7 +1,7 @@
 # REQ-service-foundation: Service readiness and operation records
 
 The internship assignment in the root `README.md` is the external authority for this record. Its API
-routes and success statuses are mandatory and may not be renamed. GitHub issues #2, #3, and #4
+routes and success statuses are mandatory and may not be renamed. GitHub issues #2, #3, #4, and #5
 narrow the implemented foundation without weakening that authority.
 
 ## Readiness obligation
@@ -39,6 +39,20 @@ must support startup through Docker Compose.
 - A provider `202 Accepted` may establish `providerPaymentId` but must not finalize the operation.
 - A matching `COMPLETED` receipt must atomically finalize `PROCESSING` and append its event, returning
   `204 No Content`.
+
+## Race-safe receipt obligations
+
+- Receipts must accept only `COMPLETED` and `REJECTED`; unknown operations return `404` and invalid
+  request bodies cannot change persistent state.
+- The first valid receipt may establish a missing provider ID and must commit linkage, final status,
+  and its event in one transaction.
+- An equivalent repeated receipt returns `204` without another transition or audit record.
+- A later opposite result returns `204`, preserves the first final status, and records one ignored
+  receipt audit event; repeating it adds no further audit event.
+- A receipt with a provider ID inconsistent with established linkage returns `409` without changes,
+  and one provider ID may belong to only one operation.
+- A callback may finalize before provider HTTP returns. Later transport acceptance may persist a
+  consistent linkage and dispatch outcome but cannot change the final state.
 
 The assignment remains the authority for provider submission, receipts, retries, and recovery
 requirements that are not duplicated in this initial record set.

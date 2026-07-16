@@ -15,11 +15,12 @@ runtime configuration and is called by a background dispatch worker.
 - **FastAPI application:** owns process lifespan, HTTP routing, dependency wiring, and readiness.
 - **Operation API:** validates the public JSON contract and coordinates transactional creation and
   submission plus read-only queries.
-- **Receipt API:** applies provider-confirmed completion in the same transaction as its event.
+- **Receipt API:** applies either provider-confirmed final result or audits an ignored opposite result
+  in the same transaction as its event.
 - **Dispatch worker:** claims durable send intents, calls the provider outside the claim transaction,
   and persists accepted provider identifiers.
 - **Provider adapter:** owns the external HTTP request and its idempotency and correlation headers.
-- **Persistence model:** represents operations and their ordered state-transition events.
+- **Persistence model:** represents operations and their ordered transition and receipt-audit events.
 - **Database adapter:** owns the async SQLAlchemy engine, session factory, readiness probe, and
   shutdown disposal.
 - **Alembic migrations:** are the reproducible authority for PostgreSQL schema evolution.
@@ -39,10 +40,13 @@ records and becomes `409 Conflict`.
 Submitting a `CREATED` operation locks it for a short transaction that creates one dispatch intent,
 changes the operation to `PROCESSING`, and appends the transition event. The worker claims that
 intent in a separate transaction, releases database locks, and then calls the provider. A provider
-`202 Accepted` stores `providerPaymentId` but leaves the operation in `PROCESSING`.
+`202 Accepted` stores a consistent `providerPaymentId` but never changes operation status; absent an
+earlier receipt, the operation therefore remains `PROCESSING`.
 
-A matching `COMPLETED` receipt locks the operation and atomically changes its state and appends the
-completion event. Provider transport success alone never establishes a final state.
+A `COMPLETED` or `REJECTED` receipt locks the operation and atomically establishes a missing
+provider linkage, changes its state, and appends the final transition event. Provider transport
+success alone never establishes a final state. Equivalent receipts are no-ops; an opposite later
+result appends an ignored-receipt audit event without changing the first final state.
 
 Reading an operation or its events opens a short-lived session. Event history is ordered by the
 per-operation `eventId`. Readiness executes a database query and cannot report ready when
@@ -55,7 +59,10 @@ PostgreSQL is unavailable.
 - A send intent, `PROCESSING` transition, and corresponding event commit or roll back together.
 - Provider HTTP occurs only after the send-intent transaction commits and holds no operation lock.
 - Only a callback receipt can establish a final operation state.
+- The first valid final receipt wins; equivalent delivery is idempotent and opposite delivery is
+  audited without changing that state.
 - `operationId` is globally unique within the service.
+- A non-null `providerPaymentId` belongs to at most one operation.
 - Event identity is unique within an operation and histories are returned in ascending `eventId`
   order.
 - Money is validated and stored as decimal data, never binary floating point.
