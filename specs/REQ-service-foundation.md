@@ -1,8 +1,8 @@
 # REQ-service-foundation: Service readiness and operation records
 
 The internship assignment in the root `README.md` is the external authority for this record. Its API
-routes and success statuses are mandatory and may not be renamed. GitHub issues #2, #3, #4, and #5
-narrow the implemented foundation without weakening that authority.
+routes and success statuses are mandatory and may not be renamed. GitHub issues #2 through #6 narrow
+the implemented foundation without weakening that authority.
 
 ## Readiness obligation
 
@@ -53,6 +53,16 @@ must support startup through Docker Compose.
   and one provider ID may belong to only one operation.
 - A callback may finalize before provider HTTP returns. Later transport acceptance may persist a
   consistent linkage and dispatch outcome but cannot change the final state.
+
+## Concurrent dispatch obligations
+
+- A simultaneous submit burst must produce exactly one `202`; remaining requests return `200` with
+  the persisted `PROCESSING` state.
+- The burst must create exactly one durable intent and one `CREATED` to `PROCESSING` transition.
+- Multiple worker loops must claim intents atomically in short transactions. Provider HTTP must occur
+  after claim commit, and callbacks must remain able to commit while a provider response is open.
+- The provider must observe one payment effect for the operation, with the stable operation ID as
+  both idempotency and correlation key and one immutable request body.
 
 The assignment remains the authority for provider submission, receipts, retries, and recovery
 requirements that are not duplicated in this initial record set.

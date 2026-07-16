@@ -14,12 +14,20 @@ endpoint returns `202 Accepted`.
 Submitting an operation already in a non-`CREATED` state returns its current representation with
 `200 OK` and creates no new intent or event. An unknown operation returns `404 Not Found`.
 
+Concurrent submissions serialize on the operation row. Exactly one request observes `CREATED`,
+commits the intent and transition, and returns `202`; all remaining requests observe the committed
+state, return `200`, and add nothing.
+
 ## Dispatch
 
 The application lifespan owns one background dispatch worker. The worker claims one unclaimed,
 undispatched intent in a short transaction, records its claim and attempt count, and copies the
 immutable operation ID, decimal amount, and currency. It then releases the transaction before
 calling `POST {PROVIDER_URL}/payments`.
+
+When worker loops in multiple application instances compete, `FOR UPDATE SKIP LOCKED` makes each
+claim atomic and prevents a locked intent from being selected twice. Claim commit precedes provider
+HTTP, so the operation row remains available to receipt handling while the response is outstanding.
 
 The request body contains `operationId`, amount, and currency. Both `Idempotency-Key` and
 `X-Correlation-ID` equal `operationId`. A response is accepted only when its HTTP status is `202`,

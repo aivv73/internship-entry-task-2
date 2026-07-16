@@ -22,7 +22,8 @@ ambiguous repeated deliveries into one payment.
 Polling adds latency and worker lifecycle complexity. Claim and outcome metadata become persistent
 coordination state that later retry and recovery behavior must maintain. PostgreSQL and provider
 idempotency together prevent duplicate effects; neither an in-memory queue nor a long transaction is
-treated as authoritative.
+treated as authoritative. Workers atomically select due intents with row locks and skip intents
+already locked by another worker, then commit the claim before provider I/O.
 
 The worker boundary is described by [ARCH-payment-service](ARCH-payment-service.md), and current
 behavior is specified by [SPEC-durable-dispatch](SPEC-durable-dispatch.md).

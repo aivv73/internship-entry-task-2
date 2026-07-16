@@ -8,7 +8,8 @@ state from process memory.
 
 The application is packaged as `candidate-service` and listens on port 8080. Docker Compose places
 it beside PostgreSQL and supplies `DATABASE_URL` and `PROVIDER_URL`. The provider address is part of
-runtime configuration and is called by a background dispatch worker.
+runtime configuration and is called by a background dispatch worker. Multiple application instances
+coordinate submissions and worker claims through PostgreSQL rather than process-local state.
 
 ## Components and boundaries
 
@@ -43,6 +44,10 @@ intent in a separate transaction, releases database locks, and then calls the pr
 `202 Accepted` stores a consistent `providerPaymentId` but never changes operation status; absent an
 earlier receipt, the operation therefore remains `PROCESSING`.
 
+Concurrent submits serialize on the operation row, so exactly one request performs the transition.
+Competing workers use row locking with locked-row skipping, so at most one claims an intent while
+other workers remain free to claim different work.
+
 A `COMPLETED` or `REJECTED` receipt locks the operation and atomically establishes a missing
 provider linkage, changes its state, and appends the final transition event. Provider transport
 success alone never establishes a final state. Equivalent receipts are no-ops; an opposite later
@@ -57,6 +62,8 @@ PostgreSQL is unavailable.
 - PostgreSQL is the sole durable source of truth.
 - An operation and the event describing its creation commit or roll back together.
 - A send intent, `PROCESSING` transition, and corresponding event commit or roll back together.
+- Concurrent submits create one intent and one transition, independent of the serving instance.
+- Competing worker loops cannot claim the same intent concurrently.
 - Provider HTTP occurs only after the send-intent transaction commits and holds no operation lock.
 - Only a callback receipt can establish a final operation state.
 - The first valid final receipt wins; equivalent delivery is idempotent and opposite delivery is
